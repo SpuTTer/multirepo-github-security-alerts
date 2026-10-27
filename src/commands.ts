@@ -3,14 +3,18 @@ import {
   env,
   ExtensionContext,
   ProgressLocation,
+  QuickPickItem,
   Range,
   Uri,
   window,
+  workspace,
 } from "vscode";
+import { CONFIG_SECTION } from "./config";
 import {
   CodeScanningAlert,
   DependabotAlert,
   DependabotAlertDependencyScope,
+  RepoState,
   store,
 } from "./store";
 import {
@@ -18,9 +22,26 @@ import {
   dismissDependabotAlert,
   enableDependabot,
   refreshAlerts,
+  refreshRepoAlerts,
+  setAllReposEnabled,
+  setRepoAccount,
+  setRepoEnabled,
 } from "./store/actions";
-import { signIn } from "./store/auth";
-import { CodeScanningAlertNode, DependabotAlertNode } from "./tree/nodes";
+import {
+  ensureAccountSession,
+  getConfiguredDefaultAccount,
+  listAccounts,
+  setConfiguredDefaultAccount,
+  signIn,
+  signInWithNewAccount,
+} from "./store/auth";
+import {
+  CodeScanningAlertNode,
+  CodeScanningNode,
+  DependabotAlertNode,
+  DependabotNode,
+  RepositoryNode,
+} from "./tree/nodes";
 import { showFileWithAlert, titleCase } from "./utils";
 
 export async function registerCommands(context: ExtensionContext) {
@@ -29,7 +50,182 @@ export async function registerCommands(context: ExtensionContext) {
   );
 
   context.subscriptions.push(
-    commands.registerCommand(`github-security.refresh`, refreshAlerts)
+    commands.registerCommand(
+      `github-security.selectDefaultAccount`,
+      async () => {
+        const accounts = await listAccounts();
+        const configured = getConfiguredDefaultAccount();
+        const AUTO = "$(account) Account preferred by VS Code";
+        const NEW = "$(add) Sign in with another account...";
+
+        type AccountPick = QuickPickItem & { accountLabel?: string };
+        const items: AccountPick[] = [
+          {
+            label: AUTO,
+            description: configured ? undefined : store.account?.label,
+            picked: !configured,
+          },
+          ...accounts.map((account) => ({
+            label: `$(github) ${account.label}`,
+            accountLabel: account.label,
+            picked: configured === account.label,
+          })),
+          { label: NEW },
+        ];
+
+        const pick = await window.showQuickPick(items, {
+          placeHolder:
+            "Default GitHub account for repositories without their own account",
+        });
+        if (!pick) {
+          return;
+        }
+
+        if (pick.label === AUTO) {
+          await setConfiguredDefaultAccount(undefined);
+          return;
+        }
+
+        let account = accounts.find((a) => a.label === pick.accountLabel);
+        if (pick.label === NEW) {
+          account = (await signInWithNewAccount())?.account;
+        }
+        if (!account) {
+          return;
+        }
+
+        try {
+          await ensureAccountSession(account);
+        } catch {
+          window.showErrorMessage(
+            `Couldn't get a GitHub session for ${account.label}.`
+          );
+          return;
+        }
+
+        await setConfiguredDefaultAccount(account.label);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    commands.registerCommand(`github-security.refresh`, () => refreshAlerts())
+  );
+
+  context.subscriptions.push(
+    commands.registerCommand(
+      `github-security.refreshRepository`,
+      (node: RepositoryNode) => refreshRepoAlerts(node.repo)
+    )
+  );
+
+  context.subscriptions.push(
+    commands.registerCommand(
+      `github-security.enableRepository`,
+      (node: RepositoryNode) => setRepoEnabled(node.repo, true)
+    ),
+    commands.registerCommand(
+      `github-security.disableRepository`,
+      (node: RepositoryNode) => setRepoEnabled(node.repo, false)
+    ),
+    commands.registerCommand(`github-security.enableAllRepositories`, () =>
+      setAllReposEnabled(true)
+    ),
+    commands.registerCommand(`github-security.disableAllRepositories`, () =>
+      setAllReposEnabled(false)
+    )
+  );
+
+  context.subscriptions.push(
+    commands.registerCommand(
+      `github-security.selectRepositoryAccount`,
+      async (node: RepositoryNode) => {
+        const { repo } = node;
+        const accounts = await listAccounts();
+        const DEFAULT = "$(account) Default account";
+        const NEW = "$(add) Sign in with another account...";
+
+        type AccountPick = QuickPickItem & { accountId?: string };
+        const items: AccountPick[] = [
+          {
+            label: DEFAULT,
+            description: store.account?.label,
+            picked: !repo.account,
+          },
+          ...accounts.map((account) => ({
+            label: `$(github) ${account.label}`,
+            accountId: account.id,
+            picked: repo.account?.id === account.id,
+          })),
+          { label: NEW },
+        ];
+
+        const pick = await window.showQuickPick(items, {
+          placeHolder: `GitHub account to use for ${repo.owner}/${repo.name}`,
+        });
+        if (!pick) {
+          return;
+        }
+
+        if (pick.label === DEFAULT) {
+          await setRepoAccount(repo, undefined);
+          return;
+        }
+
+        let account = accounts.find((a) => a.id === pick.accountId);
+        if (pick.label === NEW) {
+          account = (await signInWithNewAccount())?.account;
+        }
+        if (!account) {
+          return;
+        }
+
+        try {
+          await ensureAccountSession(account);
+        } catch {
+          window.showErrorMessage(
+            `Couldn't get a GitHub session for ${account.label}.`
+          );
+          return;
+        }
+
+        await setRepoAccount(repo, { id: account.id, label: account.label });
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    commands.registerCommand(
+      `github-security.remediate`,
+      async (node: RepositoryNode) => {
+        const { repo } = node;
+        const command =
+          workspace
+            .getConfiguration(CONFIG_SECTION, repo.rootUri)
+            .get<string>("remediateCommand")
+            ?.trim() || "npm.cmd audit fix";
+
+        if (/^npm(\.cmd)?\b/.test(command)) {
+          try {
+            await workspace.fs.stat(
+              Uri.joinPath(repo.rootUri, "package.json")
+            );
+          } catch {
+            window.showInformationMessage(
+              `${repo.owner}/${repo.name} has no package.json at its root, so "${command}" can't run there.`
+            );
+            return;
+          }
+        }
+
+        const terminal = window.createTerminal({
+          name: `Remediate: ${repo.name}`,
+          cwd: repo.rootUri,
+        });
+        terminal.show();
+        terminal.sendText(command);
+      }
+    )
   );
 
   context.subscriptions.push(
@@ -55,44 +251,50 @@ export async function registerCommands(context: ExtensionContext) {
     )
   );
 
-  function viewAlertsInBrowser(suffix: string) {
-    const url = `https://github.com/${store.repo!.owner}/${
-      store.repo!.name
-    }/security${suffix}`;
+  function viewAlertsInBrowser(
+    suffix: string,
+    node?: RepositoryNode | DependabotNode | CodeScanningNode
+  ) {
+    const repo = node?.repo || store.repos[0];
+    if (!repo) {
+      return;
+    }
+    const url = `https://github.com/${repo.owner}/${repo.name}/security${suffix}`;
     env.openExternal(Uri.parse(url));
   }
 
   context.subscriptions.push(
     commands.registerCommand(
       `github-security.viewAlertsInBrowser`,
-      viewAlertsInBrowser.bind(null, "")
+      (node?: RepositoryNode) => viewAlertsInBrowser("", node)
     )
   );
 
   context.subscriptions.push(
     commands.registerCommand(
       `github-security.viewCodeScanningAlertsInBrowser`,
-      viewAlertsInBrowser.bind(null, "/code-scanning")
+      (node?: CodeScanningNode) => viewAlertsInBrowser("/code-scanning", node)
     )
   );
 
   context.subscriptions.push(
     commands.registerCommand(
       `github-security.viewDependabotAlertsInBrowser`,
-      viewAlertsInBrowser.bind(null, "/dependabot")
+      (node?: DependabotNode) => viewAlertsInBrowser("/dependabot", node)
     )
   );
 
   context.subscriptions.push(
     commands.registerCommand(
       `github-security.openDependabotAlertManifest`,
-      (alert: DependabotAlert) => {
+      (repo: RepoState, alert: DependabotAlert) => {
         const summarySuffix =
           alert.dependency.scope === DependabotAlertDependencyScope.development
             ? " (Development)"
             : "";
 
         showFileWithAlert(
+          repo,
           alert.number,
           "dependabot",
           alert.dependency.manifest_path,
@@ -107,7 +309,7 @@ export async function registerCommands(context: ExtensionContext) {
   context.subscriptions.push(
     commands.registerCommand(
       `github-security.openCodeScanningAlertInstance`,
-      async (alert: CodeScanningAlert) => {
+      async (repo: RepoState, alert: CodeScanningAlert) => {
         const location = alert.most_recent_instance.location;
         const selection = new Range(
           location.start_line - 1,
@@ -123,6 +325,7 @@ export async function registerCommands(context: ExtensionContext) {
           : location.path;
 
         await showFileWithAlert(
+          repo,
           alert.number,
           "code-scanning",
           path,
@@ -154,7 +357,11 @@ export async function registerCommands(context: ExtensionContext) {
           placeHolder: "Select a reason to dismiss",
         });
         if (selection) {
-          dismissDependabotAlert(node.alert.number, selection.apiReason);
+          dismissDependabotAlert(
+            node.repo,
+            node.alert.number,
+            selection.apiReason
+          );
         }
       }
     )
@@ -182,43 +389,48 @@ export async function registerCommands(context: ExtensionContext) {
           placeHolder: "Select a reason to dismiss",
         });
         if (selection) {
-          dismissCodeScanningAlert(node.alert.number, selection.apiReason);
+          dismissCodeScanningAlert(
+            node.repo,
+            node.alert.number,
+            selection.apiReason
+          );
         }
       }
     )
   );
 
   context.subscriptions.push(
-    commands.registerCommand(`github-security.enableDependabot`, async () => {
-      window.withProgress(
-        {
-          title: "Enabling Dependabot...",
-          location: ProgressLocation.Notification,
-        },
-        async () => {
-          const succeeded = await enableDependabot();
-          if (succeeded) {
-            return refreshAlerts();
-          } else {
-            setTimeout(async () => {
-              const response = await window.showInformationMessage(
-                "You don't have permissions to enable dependabot on this repo.",
-                "View settings"
-              );
-              if (response === "View settings") {
-                const uri = Uri.parse(
-                  `https://github.com/${store.repo!.owner}/${
-                    store.repo!.name
-                  }/settings/security_analysis`
+    commands.registerCommand(
+      `github-security.enableDependabot`,
+      async (repo: RepoState) => {
+        window.withProgress(
+          {
+            title: `Enabling Dependabot for ${repo.owner}/${repo.name}...`,
+            location: ProgressLocation.Notification,
+          },
+          async () => {
+            const succeeded = await enableDependabot(repo);
+            if (succeeded) {
+              return refreshRepoAlerts(repo);
+            } else {
+              setTimeout(async () => {
+                const response = await window.showInformationMessage(
+                  `You don't have permissions to enable dependabot on ${repo.owner}/${repo.name}.`,
+                  "View settings"
                 );
-                env.openExternal(uri);
-              }
-            }, 1);
+                if (response === "View settings") {
+                  const uri = Uri.parse(
+                    `https://github.com/${repo.owner}/${repo.name}/settings/security_analysis`
+                  );
+                  env.openExternal(uri);
+                }
+              }, 1);
 
-            return;
+              return;
+            }
           }
-        }
-      );
-    })
+        );
+      }
+    )
   );
 }

@@ -7,10 +7,7 @@
 			"name": "Launch Extension",
 			"runtimeExecutable": "${execPath}",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}",
-				"--disable-extension=github.synth-lab",
-				"--disable-extension=github.copilot-nightly",
-				"--disable-extension=github.copilot-labs"
+				"--extensionDevelopmentPath=${workspaceFolder}"
 			],
 			"preLaunchTask": "compile",
 			"smartStep": true,

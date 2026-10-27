@@ -1,6 +1,6 @@
-# GitHub Security Alerts 🔒
+# Multi-Repo GitHub Security Alerts 🔒
 
-GitHub Security Alerts is a VS Code extension, that displays the active security alerts for your currently opened GitHub repository. It supports both [dependabot](https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/about-dependabot-security-updates), and [code scanning](https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/about-code-scanning-alerts) alerts, and allows you to quickly view, resolve, and dismiss them, directly from your editor. That way, you never miss an opportunity to improve the security of your code! 💪
+Multi-Repo GitHub Security Alerts is a VS Code extension that displays active security alerts for every GitHub repository open in your workspace. It supports both [dependabot](https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/about-dependabot-security-updates), and [code scanning](https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/about-code-scanning-alerts) alerts, and allows you to quickly view, resolve, and dismiss them, directly from your editor. That way, you never miss an opportunity to improve the security of your code! 💪
 
 <img width="800px" src="https://user-images.githubusercontent.com/116461/196554645-1ec8310f-b6ba-4446-98ce-28cbef6228d6.png">
 
@@ -17,6 +17,44 @@ Conceptually, this extension is like an editor-integrated equivalent of the `Sec
    <img width="300px" src="https://user-images.githubusercontent.com/116461/196751218-3dec6050-d704-4c35-8989-442d7ed5c4f0.png" />
 
 1. View and manage your security alerts! 🚀
+
+When multiple GitHub repositories are open in the workspace (e.g. a multi-root workspace), the `Security` view shows one collapsible section per repository, each with its own `Dependabot` and `Code Scanning` nodes. Repositories are added and removed automatically as they open and close. Use the refresh button on a repository row to refresh just that repository, or the view-level refresh to refresh all of them.
+
+To exclude a repository from scanning, right-click it (or use the inline eye icon) and choose `Disable Repository`. Disabled repositories stay listed but greyed out, fetch no alerts, and report no diagnostics; choose `Enable Repository` to bring one back. `Enable All Repositories` / `Disable All Repositories` are available in the view's `...` menu and the command palette. The enabled/disabled state is remembered per workspace.
+
+Each repository row also has a `Remediate` action (inline wrench icon or right-click) that opens a terminal at that repository's root and runs the command from the `githubSecurity.remediateCommand` setting (default `npm.cmd audit fix`). The setting is resource-scoped, so it can differ per repository folder. When the command starts with `npm`, it only runs for repositories with a `package.json` at the root; otherwise a message is shown instead.
+
+## Install the multi-repository fork
+
+Download the latest `.vsix` from the [Releases page](https://github.com/SpuTTer/multirepo-github-security-alerts/releases/latest), then install it in VS Code from the Extensions view using `...` > `Install from VSIX...`, or run `code --install-extension multirepo-github-security-alerts-<version>.vsix`.
+
+This fork uses its own extension ID (`SpuTTer.multirepo-github-security-alerts`) so it installs side by side with the original Marketplace extension.
+
+### Build from source
+
+Run these commands from the repository root:
+
+```sh
+npm ci
+npm run package
+```
+
+This creates `multirepo-github-security-alerts-<version>.vsix` in the repository root.
+
+### Publish a release
+
+Bump `version` in `package.json`, add a matching `## vX.Y.Z` section to `CHANGELOG.md`, then push a tag with the same version:
+
+```sh
+git tag v0.4.0
+git push origin main --tags
+```
+
+The `Release` workflow builds the `.vsix` and attaches it to a GitHub Release using that version's changelog section as the notes.
+
+## Credits
+
+This is a fork of [GitHub Security Alerts](https://github.com/lostintangent/github-security-alerts) by Jonathan Carter, extended to support multi-root workspaces. Licensed under the [MIT License](LICENSE.txt).
 
 ## Dependabot 🤖
 

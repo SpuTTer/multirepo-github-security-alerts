@@ -6,13 +6,17 @@ import {
   TreeDataProvider,
   TreeItem,
   window,
+  workspace,
 } from "vscode";
-import { CodeScanningAlert, DependabotAlert, Store } from "../store";
+import { CONFIG_SECTION } from "../config";
+import { CodeScanningAlert, DependabotAlert, RepoState, Store } from "../store";
+import { registerRiskDecorations } from "./decorations";
 import {
   CodeScanningAlertNode,
   CodeScanningNode,
   DependabotAlertNode,
   DependabotNode,
+  RepositoryNode,
   SeverityNode,
   TreeNode,
 } from "./nodes";
@@ -44,21 +48,36 @@ class SecurityAlertsTreeProvider
     this._onDidChangeTreeData.event;
 
   constructor(private store: Store) {
-    reaction(
-      () => [
-        store.repo,
-        store.dependabotAlerts?.map((alert) => [alert.updated_at]),
-        store.codeScanningAlerts?.map((alert) => [alert.updated_at]),
-        store.isLoading,
-        store.isSignedIn,
-      ],
-      () => {
-        this._onDidChangeTreeData.fire();
-      }
+    this._disposables.push(
+      {
+        dispose: reaction(
+          () => [
+            store.repos.map((repo) => [
+              repo.id,
+              repo.isEnabled,
+              repo.isLoading,
+              repo.account?.id,
+              repo.dependabotAccessDenied,
+              repo.dependabotAlerts?.map((alert) => [alert.updated_at]),
+              repo.codeScanningAlerts?.map((alert) => [alert.updated_at]),
+            ]),
+            store.isSignedIn,
+          ],
+          () => {
+            this._onDidChangeTreeData.fire();
+          }
+        ),
+      },
+      workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration(CONFIG_SECTION)) {
+          this._onDidChangeTreeData.fire();
+        }
+      }),
+      registerRiskDecorations(store)
     );
   }
 
-  groupCodeScanningAlerts(alerts: CodeScanningAlert[]) {
+  groupCodeScanningAlerts(repo: RepoState, alerts: CodeScanningAlert[]) {
     const severities = new Set(
       sortSeverities(
         alerts.map(
@@ -70,6 +89,7 @@ class SecurityAlertsTreeProvider
     return Array.from(severities).map(
       (severity) =>
         new SeverityNode(
+          repo,
           severity!,
           alerts.filter(
             (alert) =>
@@ -81,13 +101,14 @@ class SecurityAlertsTreeProvider
     );
   }
 
-  groupDependabotAlerts(alerts: DependabotAlert[]) {
+  groupDependabotAlerts(repo: RepoState, alerts: DependabotAlert[]) {
     const severities = new Set(
       sortSeverities(alerts.map((alert) => alert.security_advisory.severity))
     );
     return Array.from(severities).map(
       (severity) =>
         new SeverityNode(
+          repo,
           severity!,
           alerts.filter(
             (alert) => alert.security_advisory.severity === severity
@@ -103,35 +124,53 @@ class SecurityAlertsTreeProvider
 
   async getChildren(element?: TreeNode): Promise<TreeNode[] | undefined> {
     if (!element) {
-      if (this.store.repo && this.store.isSignedIn) {
-        if (this.store.isLoading) {
-          return [new TreeNode("Loading alerts...")];
-        } else {
-          return [
-            new DependabotNode(this.store.dependabotAlerts),
-            new CodeScanningNode(this.store.codeScanningAlerts),
-          ];
-        }
+      if (this.store.repos.length > 0 && this.store.isSignedIn) {
+        return this.store.repos.map((repo) => new RepositoryNode(repo));
       }
+    } else if (element instanceof RepositoryNode) {
+      const { repo } = element;
+      if (!repo.isEnabled) {
+        return [];
+      }
+      if (repo.isLoading) {
+        return [new TreeNode("Loading alerts...")];
+      }
+      return [
+        new DependabotNode(repo, repo.dependabotAlerts),
+        new CodeScanningNode(repo, repo.codeScanningAlerts),
+      ];
     } else if (element instanceof DependabotNode) {
       if (element.alerts) {
         if (element.alerts.length > 0) {
-          return this.groupDependabotAlerts(element.alerts);
+          return this.groupDependabotAlerts(element.repo, element.alerts);
         } else {
           return [new TreeNode("No alerts found")];
         }
+      } else if (element.repo.dependabotAccessDenied) {
+        const node = new TreeNode("No access with current GitHub account");
+        node.tooltip =
+          `The GitHub account used for ${element.repo.owner}/${element.repo.name} ` +
+          `can't read its Dependabot alerts. Pick a different account for this ` +
+          `repository, or check the token's scopes.`;
+        node.command = {
+          command: "github-security.selectRepositoryAccount",
+          title: "Select GitHub account",
+          arguments: [new RepositoryNode(element.repo)],
+        };
+        return [node];
       } else {
         const node = new TreeNode("Enable alerts");
         node.command = {
           command: "github-security.enableDependabot",
           title: "Enable dependabot alerts",
+          arguments: [element.repo],
         };
         return [node];
       }
     } else if (element instanceof CodeScanningNode) {
       if (element.alerts) {
         if (element.alerts.length > 0) {
-          return this.groupCodeScanningAlerts(element.alerts);
+          return this.groupCodeScanningAlerts(element.repo, element.alerts);
         } else {
           return [new TreeNode("No alerts found")];
         }
@@ -149,7 +188,7 @@ class SecurityAlertsTreeProvider
     } else if (element instanceof SeverityNode) {
       return element.alerts.map(
         // @ts-ignore
-        (alert) => new element.alertNodeConstructor(alert)
+        (alert) => new element.alertNodeConstructor(element.repo, alert)
       );
     }
   }
@@ -167,22 +206,32 @@ export function registerTreeProvider(store: Store) {
     canSelectMany: true,
   });
 
+  const updateTitle = () => {
+    tree.title = "Security";
+    const isLoading = store.repos.some((repo) => repo.isLoading);
+    const alerts = store.repos.reduce(
+      (sum, repo) =>
+        sum +
+        (repo.dependabotAlerts?.length || 0) +
+        (repo.codeScanningAlerts?.length || 0),
+      0
+    );
+
+    if (store.isSignedIn && !isLoading && alerts > 0) {
+      tree.title += ` (${alerts})`;
+    }
+  };
+
   reaction(
     () => [
       store.isSignedIn,
-      store.isLoading,
-      store.dependabotAlerts?.length,
-      store.codeScanningAlerts?.length,
+      store.repos.map((repo) => [
+        repo.isLoading,
+        repo.dependabotAlerts?.length,
+        repo.codeScanningAlerts?.length,
+      ]),
     ],
-    () => {
-      tree.title = "Security";
-      const alerts =
-        (store.dependabotAlerts?.length || 0) +
-        (store.codeScanningAlerts?.length || 0);
-
-      if (store.isSignedIn && !store.isLoading && alerts > 0) {
-        tree.title += ` (${alerts})`;
-      }
-    }
+    updateTitle,
+    { fireImmediately: true }
   );
 }

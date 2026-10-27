@@ -13,7 +13,14 @@ import {
   window,
   workspace,
 } from "vscode";
-import { store } from "./store";
+import { store, RepoState } from "./store";
+
+// Set during activation so the comment avatar can be served from the bundled icon.
+export let extensionUri: Uri | undefined;
+
+export function setExtensionUri(uri: Uri) {
+  extensionUri = uri;
+}
 
 export function titleCase(str: string) {
   return str.replace(
@@ -35,6 +42,7 @@ function clearAlertUI(closeFindWidget: boolean = false) {
 }
 
 export async function showFileWithAlert(
+  repo: RepoState,
   number: number,
   alertType: "dependabot" | "code-scanning",
   path: string,
@@ -44,7 +52,7 @@ export async function showFileWithAlert(
 ) {
   clearAlertUI(!options.search);
 
-  const fileUri = Uri.joinPath(workspace.workspaceFolders![0].uri, path);
+  const fileUri = Uri.joinPath(repo.rootUri, path);
   try {
     // This API will throw when the requested
     // URI doesn't actually exist.
@@ -83,7 +91,7 @@ export async function showFileWithAlert(
     "Security Events"
   );
   disposables.push(controller);
-  store.visibleAlert = { number, type: alertType };
+  store.visibleAlert = { repoId: repo.id, number, type: alertType };
 
   const thread = controller.createCommentThread(fileUri, options.selection!, [
     {
@@ -91,9 +99,9 @@ export async function showFileWithAlert(
       mode: CommentMode.Preview,
       author: {
         name: summary,
-        iconPath: Uri.parse(
-          "https://cdn.jsdelivr.net/gh/lostintangent/github-security-alerts/icon.png"
-        ),
+        iconPath: extensionUri
+          ? Uri.joinPath(extensionUri, "icon.png")
+          : undefined,
       },
     },
   ]);
@@ -114,7 +122,7 @@ export async function showFileWithAlert(
     disposables.push(
       window.onDidChangeTextEditorSelection((e) => {
         if (
-          e.kind == TextEditorSelectionChangeKind.Command &&
+          e.kind === TextEditorSelectionChangeKind.Command &&
           e.textEditor.document.uri.toString() === fileUri.toString()
         ) {
           thread.range = new Range(

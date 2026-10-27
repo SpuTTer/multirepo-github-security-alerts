@@ -61,7 +61,7 @@ const webConfig = {
       maxChunks: 1,
     }),
     new webpack.ProvidePlugin({
-      process: "process/browser",
+      process: "process/browser.js",
     }),
   ],
 };

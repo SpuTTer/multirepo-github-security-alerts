@@ -1,5 +1,11 @@
+import { observable, runInAction } from "mobx";
 import * as vscode from "vscode";
-import { Store } from "./store";
+import { RepoState, Store } from "./store";
+import {
+  getRepoAccount,
+  isRepoDisabled,
+  refreshRepoAlerts,
+} from "./store/actions";
 
 export interface Remote {
   readonly name: string;
@@ -13,6 +19,7 @@ interface RepositoryState {
 }
 
 export interface Repository {
+  rootUri: vscode.Uri;
   state: RepositoryState;
 }
 
@@ -21,6 +28,7 @@ interface GitAPI {
   repositories: Repository[];
 
   onDidOpenRepository: vscode.Event<Repository>;
+  onDidCloseRepository: vscode.Event<Repository>;
 }
 
 async function getGitApi(): Promise<GitAPI | undefined> {
@@ -36,57 +44,123 @@ async function getGitApi(): Promise<GitAPI | undefined> {
   return extension.exports.getAPI(1);
 }
 
-// the regexp works as follows:
-// * first we match the github.com part
-// * then we match a slash or a colon (the former is used by HTTPS remotes, the latter by SSH remotes)
-// * then we match the owner name (any non-slash, non-colon character)
-// * then we match a slash
-// * then we match the repo name (any non-slash, non-colon character)
-// * then we optionally match a .git suffix
-// * the i flag makes the regexp case-insensitive
-const GITHUB_PATTERN = /github\.com[\/|:]([^/^:]+)\/([^/^:]+?)(?:\.git)?$/i;
-function checkGitHubRemote(git: GitAPI, store: Store) {
-  const remote = git.repositories[0].state.remotes.find(
-    (remote) => remote.fetchUrl && remote.fetchUrl.includes("github.com")
+const GITHUB_PATTERN = /github\.com[/:]([^/:]+)\/([^/:]+?)(?:\.git)?\/?$/i;
+
+function getGitHubRepository(repository: Repository) {
+  const remote =
+    repository.state.remotes.find(
+      (item) =>
+        item.name === "origin" &&
+        item.fetchUrl &&
+        GITHUB_PATTERN.test(item.fetchUrl)
+    ) ||
+    repository.state.remotes.find(
+      (item) => item.fetchUrl && GITHUB_PATTERN.test(item.fetchUrl)
+    );
+  const match = remote?.fetchUrl && GITHUB_PATTERN.exec(remote.fetchUrl);
+
+  if (!match) {
+    return;
+  }
+
+  return {
+    owner: match[1],
+    name: match[2],
+    rootUri: repository.rootUri,
+  };
+}
+
+export async function initializeGit(
+  context: vscode.ExtensionContext,
+  store: Store
+) {
+  const git = await getGitApi();
+  if (!git) {
+    return;
+  }
+
+  const synchronizeRepositories = async () => {
+    const discovered = git.repositories.flatMap((repository) => {
+      const githubRepository = getGitHubRepository(repository);
+      return githubRepository ? [githubRepository] : [];
+    });
+
+    const added: RepoState[] = [];
+    const next: RepoState[] = [];
+
+    for (const found of discovered) {
+      const id = found.rootUri.toString();
+      const existing = store.repos.find(
+        (repo) =>
+          repo.id === id &&
+          repo.owner === found.owner &&
+          repo.name === found.name
+      );
+      if (existing) {
+        next.push(existing);
+        continue;
+      }
+      const repo: RepoState = observable({
+        id,
+        owner: found.owner,
+        name: found.name,
+        rootUri: found.rootUri,
+        isEnabled: !isRepoDisabled(id),
+        account: getRepoAccount(found),
+        dependabotAlerts: [],
+        codeScanningAlerts: [],
+        isLoading: false,
+      });
+      next.push(repo);
+      added.push(repo);
+    }
+
+    next.sort((a, b) =>
+      `${a.owner}/${a.name}`.localeCompare(`${b.owner}/${b.name}`)
+    );
+
+    const removed = store.repos.filter((repo) => !next.includes(repo));
+    if (removed.length === 0 && added.length === 0) {
+      return;
+    }
+
+    runInAction(() => {
+      store.repos = next;
+      if (
+        store.visibleAlert &&
+        !next.some((repo) => repo.id === store.visibleAlert!.repoId)
+      ) {
+        store.visibleAlert = undefined;
+      }
+    });
+
+    await vscode.commands.executeCommand(
+      "setContext",
+      "github-security:enabled",
+      next.length > 0
+    );
+
+    await Promise.all(added.map((repo) => refreshRepoAlerts(repo)));
+  };
+
+  const watchRepository = (repository: Repository) => {
+    context.subscriptions.push(
+      repository.state.onDidChange(() => {
+        void synchronizeRepositories();
+      })
+    );
+  };
+
+  git.repositories.forEach(watchRepository);
+  context.subscriptions.push(
+    git.onDidOpenRepository((repository) => {
+      watchRepository(repository);
+      void synchronizeRepositories();
+    }),
+    git.onDidCloseRepository(() => {
+      void synchronizeRepositories();
+    })
   );
 
-  if (remote) {
-    const match = GITHUB_PATTERN.exec(remote.fetchUrl!);
-    if (match) {
-      vscode.commands.executeCommand(
-        "setContext",
-        "github-security:enabled",
-        true
-      );
-
-      store.repo = {
-        owner: match[1],
-        name: match[2],
-      };
-    }
-  }
-}
-
-function hasRemotes(repository?: Repository) {
-  return repository && repository.state.remotes.length > 0;
-}
-
-export async function initializeGit(store: Store) {
-  const git = await getGitApi();
-  if (git) {
-    if (hasRemotes(git.repositories[0])) {
-      checkGitHubRemote(git, store);
-    } else {
-      const repoDisposable = git.onDidOpenRepository((repository) => {
-        repoDisposable.dispose();
-  
-        const stateDisposable = repository.state.onDidChange(() => {
-          if (hasRemotes(repository)) {
-            stateDisposable.dispose();
-            checkGitHubRemote(git, store);
-          }
-        });
-      });
-    }  
-  }
+  await synchronizeRepositories();
 }

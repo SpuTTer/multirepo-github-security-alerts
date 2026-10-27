@@ -1,5 +1,5 @@
 import { observable } from "mobx";
-import { CodeScanningAlertNode, DependabotAlertNode } from "../tree/nodes";
+import { Uri } from "vscode";
 
 export enum AlertState {
   dismissed = "dismissed",
@@ -107,22 +107,40 @@ export interface CodeScanningAlert {
   additionalLocations: CodeScanningAlertLocation[];
 }
 
-export interface Store {
+export interface RepoAccount {
+  id: string;
+  label: string;
+}
+
+export interface RepoState {
+  // rootUri.toString(); stable key for tree item ids and refresh tracking
+  id: string;
+  owner: string;
+  name: string;
+  rootUri: Uri;
+  isEnabled: boolean;
+  // GitHub account to use for this repo instead of the extension's default session
+  account?: RepoAccount;
   dependabotAlerts: DependabotAlert[] | null;
+  // Set when dependabotAlerts is null because the signed-in account can't see the repo's alerts
+  dependabotAccessDenied?: boolean;
   codeScanningAlerts: CodeScanningAlert[] | null;
-  visibleAlert?:{
-    number: number;
-    type: "dependabot" | "code-scanning"
-  };
   isLoading: boolean;
+}
+
+export interface Store {
+  repos: RepoState[];
+  visibleAlert?: {
+    repoId: string;
+    number: number;
+    type: "dependabot" | "code-scanning";
+  };
   isSignedIn: boolean;
   token?: string;
-  repo?: { owner: string; name: string };
+  account?: RepoAccount;
 }
 
 export const store: Store = observable({
-  dependabotAlerts: [],
-  codeScanningAlerts: [],
-  isLoading: false,
+  repos: [],
   isSignedIn: false,
 });

@@ -1,9 +1,12 @@
 .vscode/**
 .vscode-test-web/**
+.github/**
 src/**
 out/**
 node_modules/**
 .gitignore
+**/*.vsix
+package-lock.json
 vsc-extension-quickstart.md
 webpack.config.js
 .yarnrc
@@ -11,3 +14,5 @@ webpack.config.js
 **/.eslintrc.json
 **/*.map
 **/*.ts
+**/*.log
+icon.svg

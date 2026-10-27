@@ -1,16 +1,21 @@
 {
-  "name": "github-security-alerts",
-  "displayName": "GitHub Security Alerts",
-  "description": "View and resolve security alerts for GitHub repositories, directly from your editor.",
-  "publisher": "lostintangent",
+  "name": "multirepo-github-security-alerts",
+  "displayName": "Multi-Repo GitHub Security Alerts",
+  "description": "View and resolve GitHub security alerts for every repository in a multi-root workspace.",
+  "publisher": "SpuTTer",
   "icon": "icon.png",
-  "version": "0.0.5",
+  "version": "0.5.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lostintangent/github-security-alerts"
+    "url": "https://github.com/SpuTTer/multirepo-github-security-alerts"
   },
+  "bugs": {
+    "url": "https://github.com/SpuTTer/multirepo-github-security-alerts/issues"
+  },
+  "homepage": "https://github.com/SpuTTer/multirepo-github-security-alerts#readme",
   "engines": {
-    "vscode": "^1.71.0"
+    "vscode": "^1.94.0"
   },
   "categories": [
     "Other"
@@ -19,26 +24,46 @@
     "github",
     "security"
   ],
-  "activationEvents": [
-    "onCommand:github-security.refresh",
-    "onCommand:github-security.signIn",
-    "onView:github-security.alerts"
-  ],
+  "activationEvents": [],
   "main": "./dist/extension.js",
   "browser": "./dist/extension-web.js",
   "contributes": {
-    "configuration": {
-      "type": "object",
-      "title": "GitHub Security",
-      "properties": {
-        "github-security.dependabot.showDevelopmentDependencies": {
-          "default": "true",
-          "type": "boolean",
-          "description": "Specifies whether to show alerts for development-only dependencies."
-        }
-      }
-    },
     "commands": [
+      {
+        "command": "github-security.refreshRepository",
+        "title": "Refresh Repository Alerts",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "github-security.enableRepository",
+        "title": "Enable Repository",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "github-security.disableRepository",
+        "title": "Disable Repository",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "github-security.selectRepositoryAccount",
+        "title": "Select GitHub Account...",
+        "icon": "$(account)"
+      },
+      {
+        "command": "github-security.enableAllRepositories",
+        "title": "Enable All Repositories",
+        "category": "GitHub Security"
+      },
+      {
+        "command": "github-security.disableAllRepositories",
+        "title": "Disable All Repositories",
+        "category": "GitHub Security"
+      },
+      {
+        "command": "github-security.remediate",
+        "title": "Remediate",
+        "icon": "$(tools)"
+      },
       {
         "command": "github-security.dismissCodeScanningAlert",
         "title": "Dismiss Alert"
@@ -50,6 +75,11 @@
       {
         "command": "github-security.signIn",
         "title": "Sign In",
+        "category": "GitHub Security"
+      },
+      {
+        "command": "github-security.selectDefaultAccount",
+        "title": "Select Default GitHub Account...",
         "category": "GitHub Security"
       },
       {
@@ -95,6 +125,38 @@
           "when": "github-security:state == SignedIn"
         },
         {
+          "command": "github-security.selectDefaultAccount",
+          "when": "github-security:enabled"
+        },
+        {
+          "command": "github-security.refreshRepository",
+          "when": "false"
+        },
+        {
+          "command": "github-security.enableRepository",
+          "when": "false"
+        },
+        {
+          "command": "github-security.disableRepository",
+          "when": "false"
+        },
+        {
+          "command": "github-security.selectRepositoryAccount",
+          "when": "false"
+        },
+        {
+          "command": "github-security.enableAllRepositories",
+          "when": "github-security:enabled"
+        },
+        {
+          "command": "github-security.disableAllRepositories",
+          "when": "github-security:enabled"
+        },
+        {
+          "command": "github-security.remediate",
+          "when": "false"
+        },
+        {
           "command": "github-security.dismissCodeScanningAlert",
           "when": "false"
         },
@@ -130,12 +192,77 @@
           "group": "navigation@1"
         },
         {
-          "command": "github-security.viewAlertsInBrowser",
-          "when": "view == github-security.alerts && github-security:enabled && github-security:state == SignedIn",
-          "group": "navigation@2"
+          "command": "github-security.enableAllRepositories",
+          "when": "view == github-security.alerts && github-security:enabled",
+          "group": "repositories@1"
+        },
+        {
+          "command": "github-security.disableAllRepositories",
+          "when": "view == github-security.alerts && github-security:enabled",
+          "group": "repositories@2"
+        },
+        {
+          "command": "github-security.selectDefaultAccount",
+          "when": "view == github-security.alerts && github-security:enabled",
+          "group": "account@1"
         }
       ],
       "view/item/context": [
+        {
+          "command": "github-security.refreshRepository",
+          "when": "view == github-security.alerts && viewItem == repository.enabled",
+          "group": "inline@1"
+        },
+        {
+          "command": "github-security.viewAlertsInBrowser",
+          "when": "view == github-security.alerts && viewItem == repository.enabled",
+          "group": "inline@2"
+        },
+        {
+          "command": "github-security.remediate",
+          "when": "view == github-security.alerts && viewItem == repository.enabled",
+          "group": "inline@3"
+        },
+        {
+          "command": "github-security.disableRepository",
+          "when": "view == github-security.alerts && viewItem == repository.enabled",
+          "group": "inline@4"
+        },
+        {
+          "command": "github-security.enableRepository",
+          "when": "view == github-security.alerts && viewItem == repository.disabled",
+          "group": "inline@1"
+        },
+        {
+          "command": "github-security.refreshRepository",
+          "when": "view == github-security.alerts && viewItem == repository.enabled",
+          "group": "basic@1"
+        },
+        {
+          "command": "github-security.viewAlertsInBrowser",
+          "when": "view == github-security.alerts && viewItem == repository.enabled",
+          "group": "basic@2"
+        },
+        {
+          "command": "github-security.remediate",
+          "when": "view == github-security.alerts && viewItem =~ /^repository/",
+          "group": "basic@3"
+        },
+        {
+          "command": "github-security.selectRepositoryAccount",
+          "when": "view == github-security.alerts && viewItem =~ /^repository/",
+          "group": "basic@4"
+        },
+        {
+          "command": "github-security.disableRepository",
+          "when": "view == github-security.alerts && viewItem == repository.enabled",
+          "group": "toggle@1"
+        },
+        {
+          "command": "github-security.enableRepository",
+          "when": "view == github-security.alerts && viewItem == repository.disabled",
+          "group": "toggle@1"
+        },
         {
           "command": "github-security.viewAlertInBrowser",
           "when": "view == github-security.alerts && viewItem =~ /^alert/",
@@ -215,15 +342,109 @@
     "viewsWelcome": [
       {
         "view": "github-security.alerts",
-        "contents": "Manage the security alerts for this GitHub repository, by signing in with a GitHub account.\n\n[$(github-inverted) Sign In](command:github-security.signIn)",
+        "contents": "Manage the security alerts for the GitHub repositories in this workspace, by signing in with a GitHub account.\n\n[$(github-inverted) Sign In](command:github-security.signIn)",
         "when": "github-security:state != SignedIn && github-security:enabled"
       },
       {
         "view": "github-security.alerts",
-        "contents": "No git repositories found",
+        "contents": "No GitHub repositories found in this workspace",
         "when": "github-security:enabled != true"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "GitHub Security Alerts",
+      "properties": {
+        "githubSecurity.defaultAccount": {
+          "type": "string",
+          "scope": "application",
+          "order": 0,
+          "default": "",
+          "markdownDescription": "GitHub username to use for repositories that don't have an account selected via **Select GitHub Account...**. Leave empty to use the GitHub account VS Code prefers for this extension.\n\n[Choose from signed-in accounts...](command:github-security.selectDefaultAccount) — picks from the GitHub accounts already signed in to VS Code (or signs in with a new one) and fills in this setting for you."
+        },
+        "githubSecurity.highRiskSeverities": {
+          "type": "array",
+          "scope": "resource",
+          "order": 1,
+          "default": [
+            "critical",
+            "high"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "uniqueItems": true,
+          "markdownDescription": "Dependabot alert severities that mark a repository as **High Risk** in the Security view. A repository is high risk when it has at least one open alert with one of these severities. Resource-scoped, so it can be set per repository via folder settings in a multi-root workspace."
+        },
+        "githubSecurity.mediumRiskSeverities": {
+          "type": "array",
+          "scope": "resource",
+          "order": 2,
+          "default": [
+            "medium"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "uniqueItems": true,
+          "markdownDescription": "Dependabot alert severities that mark a repository as **Medium Risk** in the Security view (when it has no high-risk alerts). Any repository that is neither high nor medium risk — including one with no open alerts — is **Low Risk**. Resource-scoped."
+        },
+        "githubSecurity.highRiskSlaDays": {
+          "type": "number",
+          "scope": "resource",
+          "order": 3,
+          "default": 14,
+          "minimum": 0,
+          "markdownDescription": "Number of days a **High Risk** repository may remain high risk before it is marked **SLA BREACHED**. Measured from the oldest open high-risk Dependabot alert; a repository breaches the SLA once that age exceeds this value. Resource-scoped."
+        },
+        "githubSecurity.slaBreachedColor": {
+          "type": "string",
+          "scope": "resource",
+          "order": 4,
+          "default": "charts.red",
+          "markdownDescription": "Theme color ID used for the label and icon of **SLA BREACHED** repositories, e.g. `charts.red`, `list.errorForeground`, or `charts.purple`. Any ID from the [theme color reference](https://code.visualstudio.com/api/references/theme-color) works, and its exact value can be tuned via `#workbench.colorCustomizations#`."
+        },
+        "githubSecurity.highRiskColor": {
+          "type": "string",
+          "scope": "resource",
+          "order": 5,
+          "default": "charts.orange",
+          "markdownDescription": "Theme color ID used for the label and icon of **High Risk** repositories, e.g. `charts.orange`, `list.warningForeground`, or `charts.purple`. Any ID from the [theme color reference](https://code.visualstudio.com/api/references/theme-color) works, and its exact value can be tuned via `#workbench.colorCustomizations#`."
+        },
+        "githubSecurity.mediumRiskColor": {
+          "type": "string",
+          "scope": "resource",
+          "order": 6,
+          "default": "charts.yellow",
+          "markdownDescription": "Theme color ID used for the label and icon of **Medium Risk** repositories, e.g. `charts.yellow`, `list.warningForeground`, or `charts.blue`. Any ID from the [theme color reference](https://code.visualstudio.com/api/references/theme-color) works, and its exact value can be tuned via `#workbench.colorCustomizations#`."
+        },
+        "githubSecurity.lowRiskColor": {
+          "type": "string",
+          "scope": "resource",
+          "order": 7,
+          "default": "charts.green",
+          "markdownDescription": "Theme color ID used for the label and icon of **Low Risk** repositories, e.g. `charts.green` or `testing.iconPassed`. Any ID from the [theme color reference](https://code.visualstudio.com/api/references/theme-color) works, and its exact value can be tuned via `#workbench.colorCustomizations#`."
+        },
+        "githubSecurity.remediateCommand": {
+          "type": "string",
+          "scope": "resource",
+          "order": 8,
+          "default": "npm.cmd audit fix",
+          "markdownDescription": "Shell command run in a terminal at the repository root by the **Remediate** action. Resource-scoped, so it can be set per repository via folder settings in a multi-root workspace."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -232,20 +453,20 @@
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {
-    "@types/vscode": "^1.71.0",
+    "@types/vscode": "^1.94.0",
     "@types/webpack-env": "^1.17.0",
     "@typescript-eslint/eslint-plugin": "^5.31.0",
     "@typescript-eslint/parser": "^5.31.0",
+    "@vscode/vsce": "^4.0.0",
     "eslint": "^8.20.0",
     "process": "^0.11.10",
     "ts-loader": "^9.3.1",
     "typescript": "^4.7.4",
     "webpack": "^5.74.0",
-    "webpack-cli": "^4.10.0",
-    "vsce": "^2.11.0"
+    "webpack-cli": "^4.10.0"
   },
   "dependencies": {
-    "@octokit/rest": "^19.0.4",
+    "@octokit/rest": "^22.0.1",
     "mobx": "^6.6.2"
   }
 }
