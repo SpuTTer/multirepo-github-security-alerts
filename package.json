@@ -352,7 +352,7 @@
       }
     ],
     "configuration": {
-      "title": "GitHub Security Alerts",
+      "title": "Multi-Repo GitHub Security Alerts",
       "properties": {
         "githubSecurity.defaultAccount": {
           "type": "string",
